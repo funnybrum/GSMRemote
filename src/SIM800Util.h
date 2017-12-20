@@ -1,0 +1,1 @@
+void ToggleSIM800PowerState();
