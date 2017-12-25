@@ -16,3 +16,9 @@ Required components:
 * Arduino
 
 *Wiring diagram to be included.*
+
+## Programming the SIM800C
+
+Several commands should be executed prior using the provided software.
+* ATE0&W -> Set ECHO to OFF and save the settings.
+* AT+CLIP=1 -> Set CLIP mode to 1. This will provide teh calling number on each RING.

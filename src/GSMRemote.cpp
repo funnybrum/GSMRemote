@@ -1,26 +1,28 @@
 #include <Arduino.h>
 #include <TaskScheduler.h>
 #include <SoftwareSerial.h>
-#include "PinMap.h"
+#include "Common.h"
 #include "SIM800Util.h"
 
 
 #define MAX_COMMAND_LENGTH 128
 
 Scheduler runner;
+Task* healthCheckTask;
+Task* checkSIM800CommandsTask;
 
-void HealthCheck();
-void CheckSIM800Commands();
-
-Task healthCheckTask(30000, TASK_FOREVER, &HealthCheck, &runner, true);
-Task checkSIM800CommandsTask(1000, TASK_FOREVER, &CheckSIM800Commands, &runner, true);
-
-
-SoftwareSerial SIM800(SIM800_TX_PIN, SIM800_RX_PIN);
+SoftwareSerial SIM800 = SoftwareSerial(SIM800_TX_PIN, SIM800_RX_PIN);
 char commandBuffer[MAX_COMMAND_LENGTH];
 int commandBufferPosition = 0;
-int failureCount = 0;
-unsigned long lastSIM800read = 0;
+unsigned long lastSIM800read;
+
+/**
+  RING
+  +CLIP: "+359886501955",145,"",0,"",0
+  RING
+  +CLIP: "+359886501955",145,"",0,"",0
+  NO CARRIER
+ */
 
 void HealthCheck() {
     // Primitive health check - send "AT" to SIM800. This should triger "OK" response on the serial
@@ -28,7 +30,39 @@ void HealthCheck() {
 
     // Send only \r to terminate the line as specified in the SIM800 command manual
     // "AT Command syntax" section.
-    SIM800.write("AT\r");
+
+    // Weak up
+    SIM800.write("AT\n\r");
+    delay(250);
+    SIM800.flush();
+
+    // Check network association status, 1 is OK, everyghint else is not OK
+    char resp[128];
+    memset(resp, 0, sizeof(resp));
+    unsigned int len = SendCommandAndReadResponse("AT+CREG?", resp, 1000);
+
+    if (len == 10) {
+        if (memcmp("+CREG: 0,", resp, 9) == 0) {
+            int networkStatus = atoi(resp + 9);
+            Serial.print("Network status: ");
+            Serial.println(networkStatus);
+        } else {
+            Serial.print("Healt check failed, got wrong response(len=10): ");
+            Serial.println(resp);
+        }
+    } else {
+        Serial.print("Healt check failed, got response with len ");
+        Serial.println(len);
+        Serial.print("Response: ");
+        Serial.println(resp);
+    }
+
+    bool sleepResult = SendCommandAndVerifyResponse("AT+CSCLK=2", "OK");
+    if (sleepResult) {
+        Serial.println("Entering sleep mode: success");
+    } else {
+        Serial.println("Entering sleep mode: error");
+    }
 
     unsigned long now = millis();
 
@@ -38,36 +72,24 @@ void HealthCheck() {
         lastSIM800read = millis(); 
     }
 
-    if (now - lastSIM800read > 45000) {
-        // No response for last 45 seconds from the SIM800 module. Most likely the module is off.
-        Serial.println(F("Health check: FAILED, restarting."));
-        ToggleSIM800PowerState();
-        // asm volatile ("  jmp 0");
-    }
+    // if (now - lastSIM800read > 45000) {
+    //     // No response for last 45 seconds from the SIM800 module. Most likely the module is off.
+    //     Serial.println(F("Health check: FAILED, restarting."));
+    //     ToggleSIM800PowerState();
+    //     // asm volatile ("  jmp 0");
+    // }
 }
 
 void processCommand() {
-    if (strcmp(commandBuffer, "OK") == 0) {
+    if (strcmp(commandBuffer, "RDY") == 0 ||
+        strcmp(commandBuffer, "+CFUN: 1") == 0 ||
+        strcmp(commandBuffer, "+CPIN: READY") == 0) {
         // Ignore this one.
+        memset(commandBuffer, 0, MAX_COMMAND_LENGTH);
+        commandBufferPosition = 0;
         return;
     }
-    if (strcmp(commandBuffer, "AT") == 0) {
-        // Ignore this one.
-        return;
-    }
-    if (strcmp(commandBuffer, "RDY") == 0) {
-        // Ignore this one. Indicates serial interface is ready in non auto-baunding mode.
-        return;
-    }
-    //NORMAL POWER DOWN
-    //AT
-    //OK
-    //RDY
-    //+CFUN: 1
-    //+CPIN: READY
-    //Call Ready
-    //SMS Ready
-    Serial.print(F("Got command: "));
+    
     Serial.println(commandBuffer);
     memset(commandBuffer, 0, MAX_COMMAND_LENGTH);
     commandBufferPosition = 0;
@@ -80,8 +102,7 @@ void CheckSIM800Commands() {
 
         if ('\n' == ch) {
             //Ignore these.
-        }
-        if ('\r' == ch) {
+        } else if ('\r' == ch) {
             if (commandBufferPosition > 0) {
                 processCommand();
             }
@@ -122,6 +143,9 @@ void setup() {
 
     runner.startNow();
 
+    // healthCheckTask = new Task(1L * 60L * 1000L, TASK_FOREVER, &HealthCheck, &runner, true);
+    checkSIM800CommandsTask = new Task(100L, TASK_FOREVER, &CheckSIM800Commands, &runner, true);
+
     Serial.println(F("Setup completed."));
 }
 
@@ -135,6 +159,8 @@ void loop() {
         } else if (ch =='>') {
             // Ctrl+z
             SIM800.write(0x1A);
+        } else if (ch == '~') {
+            HealthCheck();
         } else {
             SIM800.write(ch);
         }
