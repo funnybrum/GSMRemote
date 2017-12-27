@@ -9,6 +9,7 @@ SIM800::SIM800(short rxPin, short txPin, short powerPin, void (*cmdProcessor)(ch
 
 void SIM800::togglePowerState() {
     Serial.println(F("Toggling power state of SIM800"));
+    resetCommandBuffer();
     digitalWrite(_powerPin, LOW);
     delay(1100);
     digitalWrite(_powerPin, HIGH);
@@ -56,7 +57,11 @@ unsigned int SIM800::sendCommandAndReadResponse(const char* cmd, char* resp, uns
 bool SIM800::sendCommandAndVerifyResponse(const char* cmd, const char* expectedResponse, unsigned int timeout) {
     char resp[SIM800_CMD_BUFFER_LENGTH];
     memset(resp, 0, SIM800_CMD_BUFFER_LENGTH);
-    sendCommandAndReadResponse(cmd, resp, timeout);
+    sendCommandAndReadResponse(cmd, resp, timeout, true);
+    if (strcmp(resp, expectedResponse) != 0) {
+        Serial.print(">>");
+        Serial.println(resp);
+    }
     return strcmp(resp, expectedResponse) == 0;
 }
 

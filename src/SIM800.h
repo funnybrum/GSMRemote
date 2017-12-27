@@ -4,7 +4,7 @@
 #include <Arduino.h>
 #include <SoftwareSerial.h>
 
-#define SIM800_CMD_BUFFER_LENGTH 32
+#define SIM800_CMD_BUFFER_LENGTH 48
 
 class SIM800 {
     private:

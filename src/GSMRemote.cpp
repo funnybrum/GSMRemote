@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <TaskScheduler.h>
 #include "Pins.h"
+#include "Secrets.h"
 #include "SIM800.h"
 
 void ProcessCommand(char*);
@@ -8,12 +9,24 @@ void ProcessCommand(char*);
 SIM800 sim800 = SIM800(SIM800_RX_PIN, SIM800_TX_PIN, SIM800_PW_PIN, ProcessCommand);
 
 Scheduler runner;
-Task* healthCheckTask;
+Task* checkNetworkStatusTask = 0;
+Task* healthCheckTask = 0;
 
-#define MAX_COMMAND_LENGTH 128
-char commandBuffer[MAX_COMMAND_LENGTH];
-int commandBufferPosition = 0;
-unsigned long lastSIM800read;
+unsigned long lastOKNetworkStatus;
+unsigned long externalDevicePoweredOnAt;
+bool externalDevicePoweredOn = false;
+
+void powerOn(bool powerOn) {
+    if (powerOn) {
+        digitalWrite(RELAY_PIN, HIGH);
+        externalDevicePoweredOnAt = millis();
+        Serial.println(F("Turning ON external device"));
+    } else {
+        digitalWrite(RELAY_PIN, HIGH);
+        Serial.println(F("Turning OFF external device"));
+    }
+    externalDevicePoweredOn = powerOn;
+}
 
 /**
   RING
@@ -23,7 +36,7 @@ unsigned long lastSIM800read;
   NO CARRIER
  */
 
-void HealthCheck() {
+void CheckNetworkStatus() {
     // Weak up
     sim800.sendCommand("AT", 250);
 
@@ -39,30 +52,33 @@ void HealthCheck() {
         networkStatus = atoi(resp + 9);
     }
 
-    // TODO -> use the network status for something useful.
-    Serial.print("Got network status: ");
-    Serial.println(networkStatus);
+    if (networkStatus == 1) {
+        lastOKNetworkStatus = millis();
+    }
 
     // Get back to sleep mode.
     bool sleepResult = sim800.sendCommandAndVerifyResponse("AT+CSCLK=2", "OK");
     if (!sleepResult) {
-        Serial.println("Failed to enter sleep mode!");
+        Serial.println(F("Failed to enter sleep mode!"));
     }
+}
 
+void HealthCheck() {
     unsigned long now = millis();
 
-    if (now < lastSIM800read) {
+    if (now < lastOKNetworkStatus) {
         // The timer has overflowed (running for more than 50 days). Zero the last response and
         // skip this health check.
-        lastSIM800read = millis(); 
+        lastOKNetworkStatus = now;
     }
 
-    // if (now - lastSIM800read > 45000) {
-    //     // No response for last 45 seconds from the SIM800 module. Most likely the module is off.
-    //     Serial.println(F("Health check: FAILED, restarting."));
-    //     ToggleSIM800PowerState();
-    //     // asm volatile ("  jmp 0");
-    // }
+    if (now - lastOKNetworkStatus > 10L * 60L * 1000L) {
+        // No OK network status for last 10 minutes.
+        Serial.println(F("Health check: FAILED, restarting."));
+        checkNetworkStatusTask->disable();
+        sim800.togglePowerState();
+        // asm volatile ("  jmp 0");
+    }    
 }
 
 void ProcessCommand(char* commandBuffer) {
@@ -73,10 +89,31 @@ void ProcessCommand(char* commandBuffer) {
         return;
     }
 
-    if (strcmp(commandBuffer, "SMS Ready") == 0) {
-        healthCheckTask->enable();
+    if (strcmp(commandBuffer, "SMS Ready") == 0 ||
+        strcmp(commandBuffer, "Call Ready") == 0) {
+        checkNetworkStatusTask->enable();
+        return;
     }
-    
+
+    if (memcmp(commandBuffer, "+CLIP: \"", 8) == 0) {
+        // Incomming call.
+        char callNumber[32];
+        int i = 0;
+        while (commandBuffer[i+8] != 0 && commandBuffer[i+8] != '"') {
+            callNumber[i] = commandBuffer[i+8];
+            i++;
+        }
+        callNumber[i] = 0;
+
+        if (strcmp(callNumber, AUTHORIZED_NUMBER) == 0) {
+            Serial.println("Authorized call!");
+            sim800.sendCommand("ATH");
+            powerOn(!externalDevicePoweredOn);
+        }
+
+        return;
+    }
+
     Serial.println(commandBuffer);
 }
 
@@ -97,14 +134,15 @@ void setup() {
     sim800.togglePowerState();
     runner.startNow();
 
-    healthCheckTask = new Task(1L * 10L * 1000L, TASK_FOREVER, &HealthCheck, &runner, false);
+    // TODO -> adjust task scheduling intervals.
+    checkNetworkStatusTask = new Task(1L * 10L * 1000L, TASK_FOREVER, &CheckNetworkStatus, &runner, false);
+    healthCheckTask = new Task(60L * 1000L, TASK_FOREVER, &HealthCheck, &runner, true);
 
     Serial.println(F("Setup completed."));
 }
 
 void loop() {
     runner.execute();
-    // Serial.println("sim800.loop()");
     sim800.loop();
     delay(100);
 
@@ -112,12 +150,12 @@ void loop() {
         char ch = Serial.read();
         if (ch == '<') {
             sim800.togglePowerState();
-            healthCheckTask->disable();
+            checkNetworkStatusTask->disable();
         } else if (ch =='>') {
             // Ctrl+z
             sim800.write(0x1A);
         } else if (ch == '~') {
-            HealthCheck();
+            CheckNetworkStatus();
         } else {
             sim800.write(ch);
         }
