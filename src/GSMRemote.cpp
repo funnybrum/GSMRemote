@@ -1,67 +1,52 @@
 #include <Arduino.h>
 #include <TaskScheduler.h>
-#include <SoftwareSerial.h>
-#include "Common.h"
-#include "SIM800Util.h"
+#include "Pins.h"
+#include "SIM800.h"
 
+void ProcessCommand(char*);
 
-#define MAX_COMMAND_LENGTH 128
+SIM800 sim800 = SIM800(SIM800_RX_PIN, SIM800_TX_PIN, SIM800_PW_PIN, ProcessCommand);
 
 Scheduler runner;
 Task* healthCheckTask;
-Task* checkSIM800CommandsTask;
 
-SoftwareSerial SIM800 = SoftwareSerial(SIM800_TX_PIN, SIM800_RX_PIN);
+#define MAX_COMMAND_LENGTH 128
 char commandBuffer[MAX_COMMAND_LENGTH];
 int commandBufferPosition = 0;
 unsigned long lastSIM800read;
 
 /**
   RING
-  +CLIP: "+359886501955",145,"",0,"",0
+  +CLIP: "+35988xxxxxxx",145,"",0,"",0
   RING
-  +CLIP: "+359886501955",145,"",0,"",0
+  +CLIP: "+35988xxxxxxx",145,"",0,"",0
   NO CARRIER
  */
 
 void HealthCheck() {
-    // Primitive health check - send "AT" to SIM800. This should triger "OK" response on the serial
-    // interface.
-
-    // Send only \r to terminate the line as specified in the SIM800 command manual
-    // "AT Command syntax" section.
-
     // Weak up
-    SIM800.write("AT\n\r");
-    delay(250);
-    SIM800.flush();
+    sim800.sendCommand("AT", 250);
 
-    // Check network association status, 1 is OK, everyghint else is not OK
-    char resp[128];
+    // Check network association status, 1 is OK, everyghint else is not OK.
+    char resp[SIM800_CMD_BUFFER_LENGTH];
     memset(resp, 0, sizeof(resp));
-    unsigned int len = SendCommandAndReadResponse("AT+CREG?", resp, 1000);
+    
+    sim800.sendCommandAndReadResponse("AT+CREG?", resp, 1000);
+    int networkStatus = -1;
 
-    if (len == 10) {
-        if (memcmp("+CREG: 0,", resp, 9) == 0) {
-            int networkStatus = atoi(resp + 9);
-            Serial.print("Network status: ");
-            Serial.println(networkStatus);
-        } else {
-            Serial.print("Healt check failed, got wrong response(len=10): ");
-            Serial.println(resp);
-        }
-    } else {
-        Serial.print("Healt check failed, got response with len ");
-        Serial.println(len);
-        Serial.print("Response: ");
-        Serial.println(resp);
+    // Check if we have suffessful response.
+    if (memcmp("+CREG: 0,", resp, 9) == 0) {
+        networkStatus = atoi(resp + 9);
     }
 
-    bool sleepResult = SendCommandAndVerifyResponse("AT+CSCLK=2", "OK");
-    if (sleepResult) {
-        Serial.println("Entering sleep mode: success");
-    } else {
-        Serial.println("Entering sleep mode: error");
+    // TODO -> use the network status for something useful.
+    Serial.print("Got network status: ");
+    Serial.println(networkStatus);
+
+    // Get back to sleep mode.
+    bool sleepResult = sim800.sendCommandAndVerifyResponse("AT+CSCLK=2", "OK");
+    if (!sleepResult) {
+        Serial.println("Failed to enter sleep mode!");
     }
 
     unsigned long now = millis();
@@ -80,55 +65,22 @@ void HealthCheck() {
     // }
 }
 
-void processCommand() {
+void ProcessCommand(char* commandBuffer) {
     if (strcmp(commandBuffer, "RDY") == 0 ||
         strcmp(commandBuffer, "+CFUN: 1") == 0 ||
         strcmp(commandBuffer, "+CPIN: READY") == 0) {
         // Ignore this one.
-        memset(commandBuffer, 0, MAX_COMMAND_LENGTH);
-        commandBufferPosition = 0;
         return;
+    }
+
+    if (strcmp(commandBuffer, "SMS Ready") == 0) {
+        healthCheckTask->enable();
     }
     
     Serial.println(commandBuffer);
-    memset(commandBuffer, 0, MAX_COMMAND_LENGTH);
-    commandBufferPosition = 0;
-}
-
-void CheckSIM800Commands() {
-    while (SIM800.available()) {
-        lastSIM800read = millis();
-        char ch = SIM800.read();
-
-        if ('\n' == ch) {
-            //Ignore these.
-        } else if ('\r' == ch) {
-            if (commandBufferPosition > 0) {
-                processCommand();
-            }
-        } else {
-            commandBuffer[commandBufferPosition] = ch;
-            commandBufferPosition++;
-            if (commandBufferPosition == MAX_COMMAND_LENGTH) {
-                // Something went wrong. A command longer than MAX_COMMAND_LENGTH seems to be
-                // incoming. Try to process it and reset the buffer.
-                Serial.println(F("Detected buffer overflow..."));
-                processCommand();
-                delay(100);
-                SIM800.flush();
-            }
-        }
-    }
 }
 
 void setup() {
-    Serial.begin(9600);
-    
-    while(!Serial)
-        delay(100);
-
-    SIM800.begin(9600);
-
     // Prepare the on/off pin.
     pinMode(SIM800_PW_PIN, OUTPUT);
     digitalWrite(SIM800_PW_PIN, HIGH);
@@ -137,32 +89,37 @@ void setup() {
     pinMode(RELAY_PIN, OUTPUT);
     digitalWrite(RELAY_PIN, LOW);
 
-    ToggleSIM800PowerState();
+    Serial.begin(9600);
+    
+    while(!Serial)
+        delay(100);
 
-    lastSIM800read = millis();
-
+    sim800.togglePowerState();
     runner.startNow();
 
-    // healthCheckTask = new Task(1L * 60L * 1000L, TASK_FOREVER, &HealthCheck, &runner, true);
-    checkSIM800CommandsTask = new Task(100L, TASK_FOREVER, &CheckSIM800Commands, &runner, true);
+    healthCheckTask = new Task(1L * 10L * 1000L, TASK_FOREVER, &HealthCheck, &runner, false);
 
     Serial.println(F("Setup completed."));
 }
 
 void loop() {
     runner.execute();
+    // Serial.println("sim800.loop()");
+    sim800.loop();
+    delay(100);
 
     while (Serial.available()) {
         char ch = Serial.read();
         if (ch == '<') {
-            ToggleSIM800PowerState();
+            sim800.togglePowerState();
+            healthCheckTask->disable();
         } else if (ch =='>') {
             // Ctrl+z
-            SIM800.write(0x1A);
+            sim800.write(0x1A);
         } else if (ch == '~') {
             HealthCheck();
         } else {
-            SIM800.write(ch);
+            sim800.write(ch);
         }
     }
 }
