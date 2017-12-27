@@ -16,14 +16,23 @@ unsigned long lastOKNetworkStatus;
 unsigned long externalDevicePoweredOnAt;
 bool externalDevicePoweredOn = false;
 
+// Keep the external deviced turned on for at most X minutes
+#define MAX_TURN_ON_DURATION_MIN 3L
+
+// Try to turn off/on the SIM800 if the network status is not OK after X minuites
+#define HOLD_ON_BAD_NETWORK_STATUS_MIN 10L
+
+
 void powerOn(bool powerOn) {
     if (powerOn) {
         digitalWrite(RELAY_PIN, HIGH);
         externalDevicePoweredOnAt = millis();
-        Serial.println(F("Turning ON external device"));
+        Serial.print(millis() / 1000);
+        Serial.println(F(" > Turning ON external device"));
     } else {
-        digitalWrite(RELAY_PIN, HIGH);
-        Serial.println(F("Turning OFF external device"));
+        digitalWrite(RELAY_PIN, LOW);
+        Serial.print(millis() / 1000);
+        Serial.println(F(" > Turning OFF external device"));
     }
     externalDevicePoweredOn = powerOn;
 }
@@ -72,13 +81,23 @@ void HealthCheck() {
         lastOKNetworkStatus = now;
     }
 
-    if (now - lastOKNetworkStatus > 10L * 60L * 1000L) {
+    if (now - lastOKNetworkStatus > HOLD_ON_BAD_NETWORK_STATUS_MIN * 60L * 1000L) {
         // No OK network status for last 10 minutes.
         Serial.println(F("Health check: FAILED, restarting."));
         checkNetworkStatusTask->disable();
         sim800.togglePowerState();
-        // asm volatile ("  jmp 0");
-    }    
+    }
+
+    if (externalDevicePoweredOn) {
+        if (now < externalDevicePoweredOnAt) {
+            externalDevicePoweredOnAt = now;
+        }
+
+
+        if (now - externalDevicePoweredOnAt > MAX_TURN_ON_DURATION_MIN * 60L * 1000L) {
+            powerOn(false);
+        }
+    }
 }
 
 void ProcessCommand(char* commandBuffer) {
@@ -107,11 +126,20 @@ void ProcessCommand(char* commandBuffer) {
 
         if (strcmp(callNumber, AUTHORIZED_NUMBER) == 0) {
             Serial.println("Authorized call!");
-            sim800.sendCommand("ATH");
             powerOn(!externalDevicePoweredOn);
+            // Avoid re-triggering the external device for the same call.
+            for (int i = 0; i < 5; i++) {
+                sim800.sendCommand("ATH");
+                delay(1000);
+            }
         }
 
         return;
+    }
+
+    if (strcmp(commandBuffer, "NORMAL POWER DOWN") == 0) {
+        sim800.togglePowerState();
+        checkNetworkStatusTask->disable();
     }
 
     Serial.println(commandBuffer);
@@ -135,8 +163,8 @@ void setup() {
     runner.startNow();
 
     // TODO -> adjust task scheduling intervals.
-    checkNetworkStatusTask = new Task(1L * 10L * 1000L, TASK_FOREVER, &CheckNetworkStatus, &runner, false);
-    healthCheckTask = new Task(60L * 1000L, TASK_FOREVER, &HealthCheck, &runner, true);
+    checkNetworkStatusTask = new Task(3L * 10L * 1000L, TASK_FOREVER, &CheckNetworkStatus, &runner, false);
+    healthCheckTask = new Task(1L * 60L * 1000L, TASK_FOREVER, &HealthCheck, &runner, true);
 
     Serial.println(F("Setup completed."));
 }
