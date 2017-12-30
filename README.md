@@ -18,7 +18,7 @@ Required components:
 
 ## Wiring diagram
 
-Some parts are still missing. Like the rellay control circuit and the VCC following circuit.
+Some parts are still missing. Like the rellay control circuit and the VCC monitoring circuit.
 
 ### Details
 
@@ -32,4 +32,8 @@ The diode between 3.8V and the Arduino 5V pin is to protect the SIM800C in case 
 
 Several commands should be executed prior using the provided source code.
 * ATE0&W -> Set ECHO to OFF and save the settings.
-* AT+CLIP=1 -> Set CLIP mode to 1. This will provide teh calling number on each RING.
+* AT+CLIP=1 -> Set CLIP mode to 1. This will provide the calling number on each RING.
+
+## TODOs
+* Add voltage monitoring circuit and code.
+* Measure the power consumption over 24 hours.

@@ -108,7 +108,8 @@ void CheckTimeConstraints() {
 void HandleResponse(char* response) {
     if (strcmp(response, "RDY") == 0 ||
         strcmp(response, "+CFUN: 1") == 0 ||
-        strcmp(response, "+CPIN: READY") == 0) {
+        strcmp(response, "+CPIN: READY") == 0 ||
+        strcmp(response, "RING") == 0) {
         // Ignore these.
         return;
     }
