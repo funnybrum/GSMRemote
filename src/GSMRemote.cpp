@@ -4,36 +4,45 @@
 #include "Secrets.h"
 #include "SIM800.h"
 
-void ProcessCommand(char*);
+// Macro converting minutes to millis.
+#define MIN_TO_MILLIS(mins) (mins * 60L * 1000L)
 
-SIM800 sim800 = SIM800(SIM800_RX_PIN, SIM800_TX_PIN, SIM800_PW_PIN, ProcessCommand);
+// Keep the external deviced turned on for at most X minutes.
+#define MAX_TURN_ON_DURATION MIN_TO_MILLIS(15L)
+
+// Try to turn off/on the SIM800 if the network status is not OK after X minuites.
+#define HOLD_ON_BAD_NETWORK_STATUS MIN_TO_MILLIS(20L)
+
+// Power cycle SIM800C if no serial activity for more than X minutes.
+#define HOLD_ON_NO_SERIAL_ACTIVITY MIN_TO_MILLIS(10L)
+
+// Each X minutes check to see if there is a time constraint activity, like:
+// * if the max running time for the external device has been reached
+// * if the max bad network status interval was reached
+// * if the max no serial activity interval was reached
+// If any of the above has been detected - take action.
+#define TIME_CONSTRAINS_CHECK_INTERVAL MIN_TO_MILLIS(1L)
+
+#define NETWORK_STATUS_CHECK_INTERVAL MIN_TO_MILLIS(5L)
+
+
+void HandleResponse(char*);
+
+SIM800 sim800 = SIM800(SIM800_RX_PIN, SIM800_TX_PIN, SIM800_PW_PIN, HandleResponse);
 
 Scheduler runner;
 Task* checkNetworkStatusTask = 0;
-Task* healthCheckTask = 0;
+Task* checkTimeConstraintsTask = 0;
 
-unsigned long lastOKNetworkStatus;
+unsigned long lastGoodNetworkStatus;
 unsigned long externalDevicePoweredOnAt;
 bool externalDevicePoweredOn = false;
 
-// Keep the external deviced turned on for at most X minutes
-#define MAX_TURN_ON_DURATION_MIN 3L
-
-// Try to turn off/on the SIM800 if the network status is not OK after X minuites
-#define HOLD_ON_BAD_NETWORK_STATUS_MIN 10L
-
-
 void powerOn(bool powerOn) {
-    if (powerOn) {
-        digitalWrite(RELAY_PIN, HIGH);
-        externalDevicePoweredOnAt = millis();
-        Serial.print(millis() / 1000);
-        Serial.println(F(" > Turning ON external device"));
-    } else {
-        digitalWrite(RELAY_PIN, LOW);
-        Serial.print(millis() / 1000);
-        Serial.println(F(" > Turning OFF external device"));
-    }
+    Serial.print(F("Setting external device power state to: "));
+    Serial.println(powerOn?"ON":"OFF");
+    digitalWrite(RELAY_PIN, powerOn?HIGH:LOW);
+    externalDevicePoweredOnAt = millis();
     externalDevicePoweredOn = powerOn;
 }
 
@@ -50,7 +59,7 @@ void CheckNetworkStatus() {
     sim800.sendCommand("AT", 250);
 
     // Check network association status, 1 is OK, everyghint else is not OK.
-    char resp[SIM800_CMD_BUFFER_LENGTH];
+    char resp[SIM800_RESPONSE_BUFFER_LENGTH];
     memset(resp, 0, sizeof(resp));
     
     sim800.sendCommandAndReadResponse("AT+CREG?", resp, 1000);
@@ -62,7 +71,7 @@ void CheckNetworkStatus() {
     }
 
     if (networkStatus == 1) {
-        lastOKNetworkStatus = millis();
+        lastGoodNetworkStatus = millis();
     }
 
     // Get back to sleep mode.
@@ -72,54 +81,51 @@ void CheckNetworkStatus() {
     }
 }
 
-void HealthCheck() {
+void CheckTimeConstraints() {
     unsigned long now = millis();
 
-    if (now < lastOKNetworkStatus) {
-        // The timer has overflowed (running for more than 50 days). Zero the last response and
-        // skip this health check.
-        lastOKNetworkStatus = now;
-    }
-
-    if (now - lastOKNetworkStatus > HOLD_ON_BAD_NETWORK_STATUS_MIN * 60L * 1000L) {
-        // No OK network status for last 10 minutes.
-        Serial.println(F("Health check: FAILED, restarting."));
-        checkNetworkStatusTask->disable();
+    unsigned long timeSinceLastGoodNetworkStatus = now - lastGoodNetworkStatus;
+    if (timeSinceLastGoodNetworkStatus > HOLD_ON_BAD_NETWORK_STATUS
+        || sim800.getMillisSinceLastSerialActivity() > HOLD_ON_NO_SERIAL_ACTIVITY) {
         sim800.togglePowerState();
+        checkNetworkStatusTask->disable();
+        lastGoodNetworkStatus = now;
     }
 
     if (externalDevicePoweredOn) {
-        if (now < externalDevicePoweredOnAt) {
-            externalDevicePoweredOnAt = now;
-        }
-
-
-        if (now - externalDevicePoweredOnAt > MAX_TURN_ON_DURATION_MIN * 60L * 1000L) {
+        unsigned long timeSinceExternalDeviceWasPoweredOn = now - externalDevicePoweredOnAt;
+        if (timeSinceExternalDeviceWasPoweredOn > MAX_TURN_ON_DURATION) {
             powerOn(false);
         }
+        
+        // TODO - add circuit to check external VCC (~12V). If the engine is powered on it will
+        // be at >13V . By design - if the car is powered on the remote should turn off the heater
+        // device. The user has the power to keep it running if he needs it by manually activating
+        // the detault power button prior starting the engine.
     }
 }
 
-void ProcessCommand(char* commandBuffer) {
-    if (strcmp(commandBuffer, "RDY") == 0 ||
-        strcmp(commandBuffer, "+CFUN: 1") == 0 ||
-        strcmp(commandBuffer, "+CPIN: READY") == 0) {
-        // Ignore this one.
+void HandleResponse(char* response) {
+    if (strcmp(response, "RDY") == 0 ||
+        strcmp(response, "+CFUN: 1") == 0 ||
+        strcmp(response, "+CPIN: READY") == 0) {
+        // Ignore these.
         return;
     }
 
-    if (strcmp(commandBuffer, "SMS Ready") == 0 ||
-        strcmp(commandBuffer, "Call Ready") == 0) {
+    if (strcmp(response, "SMS Ready") == 0 ||
+        strcmp(response, "Call Ready") == 0) {
+        // The SIM800C is up and running. Start the regular network status checks.
         checkNetworkStatusTask->enable();
         return;
     }
 
-    if (memcmp(commandBuffer, "+CLIP: \"", 8) == 0) {
+    if (memcmp(response, "+CLIP: \"", 8) == 0) {
         // Incomming call.
         char callNumber[32];
         int i = 0;
-        while (commandBuffer[i+8] != 0 && commandBuffer[i+8] != '"') {
-            callNumber[i] = commandBuffer[i+8];
+        while (response[i+8] != 0 && response[i+8] != '"') {
+            callNumber[i] = response[i+8];
             i++;
         }
         callNumber[i] = 0;
@@ -127,8 +133,10 @@ void ProcessCommand(char* commandBuffer) {
         if (strcmp(callNumber, AUTHORIZED_NUMBER) == 0) {
             Serial.println("Authorized call!");
             powerOn(!externalDevicePoweredOn);
-            // Avoid re-triggering the external device for the same call.
-            for (int i = 0; i < 5; i++) {
+            // Some times single ATH is not enough to hang up the call and another +CLIP: ... will
+            // be received. To avoid this - send the ATH a few times and flush the SIM800C serial
+            // interface.
+            for (int i = 0; i < 3; i++) {
                 sim800.sendCommand("ATH");
                 delay(1000);
             }
@@ -137,12 +145,16 @@ void ProcessCommand(char* commandBuffer) {
         return;
     }
 
-    if (strcmp(commandBuffer, "NORMAL POWER DOWN") == 0) {
+    if (strcmp(response, "NORMAL POWER DOWN") == 0) {
+        // Hmm. This should not be seen unless the serial interface is connected while SIM800C is
+        // running. In that case setup() will power it off and the above if condition will be true.
         sim800.togglePowerState();
         checkNetworkStatusTask->disable();
+        return;
     }
 
-    Serial.println(commandBuffer);
+    Serial.print(F("Unhandled response: "));
+    Serial.println(response);
 }
 
 void setup() {
@@ -162,9 +174,8 @@ void setup() {
     sim800.togglePowerState();
     runner.startNow();
 
-    // TODO -> adjust task scheduling intervals.
-    checkNetworkStatusTask = new Task(3L * 10L * 1000L, TASK_FOREVER, &CheckNetworkStatus, &runner, false);
-    healthCheckTask = new Task(1L * 60L * 1000L, TASK_FOREVER, &HealthCheck, &runner, true);
+    checkNetworkStatusTask = new Task(NETWORK_STATUS_CHECK_INTERVAL, TASK_FOREVER, &CheckNetworkStatus, &runner, false);
+    checkTimeConstraintsTask = new Task(TIME_CONSTRAINS_CHECK_INTERVAL, TASK_FOREVER, &CheckTimeConstraints, &runner, true);
 
     Serial.println(F("Setup completed."));
 }
@@ -174,6 +185,11 @@ void loop() {
     sim800.loop();
     delay(100);
 
+    // For debugging purposes. Any character received on the Arduino serial interface will be
+    // forwarded to the SIM800C serial interface. There are a few special charactes:
+    // * '<' will toggle the power state of the SIM800C module.
+    // * '>' will send CTRL+Z. This is the SMS terminate character.
+    // * '~' will execute the CheckNetworkStatus function.
     while (Serial.available()) {
         char ch = Serial.read();
         if (ch == '<') {

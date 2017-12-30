@@ -15,10 +15,13 @@ Required components:
 * DC buck converter (or other efficient way to deliver over 2A current at ~3.8V)
 * Arduino
 
-*Wiring diagram to be included.*
+## Wiring diagram
+
+![GSM Remote wiring diagram](./schematic/gsm_remote.png "Wiring diagram")
+
 
 ## Programming the SIM800C
 
-Several commands should be executed prior using the provided software.
+Several commands should be executed prior using the provided source code.
 * ATE0&W -> Set ECHO to OFF and save the settings.
 * AT+CLIP=1 -> Set CLIP mode to 1. This will provide teh calling number on each RING.

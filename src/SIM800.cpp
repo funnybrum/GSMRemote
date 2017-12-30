@@ -5,20 +5,23 @@ SIM800::SIM800(short rxPin, short txPin, short powerPin, void (*cmdProcessor)(ch
     _serial = new SoftwareSerial(txPin, rxPin);
     _serial->begin(9600);
     _cmdProcessor = cmdProcessor;
+    _lastSerialActivity = millis();
 }
 
 void SIM800::togglePowerState() {
-    Serial.println(F("Toggling power state of SIM800"));
-    resetCommandBuffer();
+    Serial.println(F("Toggling power state of SIM800C"));
+    resetResponseBuffer();
     digitalWrite(_powerPin, LOW);
     delay(1100);
     digitalWrite(_powerPin, HIGH);
+    _lastSerialActivity = millis();
 }
 
 void SIM800::flush(unsigned int delay_ms) {
     delay(delay_ms);
 
     while (_serial->available()) {
+        _lastSerialActivity = millis();
         _serial->read();
     }
 }
@@ -28,7 +31,7 @@ unsigned int SIM800::sendCommandAndReadResponse(const char* cmd, char* resp, uns
         this->flush(250);
     }
 
-    resetCommandBuffer();
+    resetResponseBuffer();
     sendCommand(cmd, false);
 
     bool received = false;
@@ -45,18 +48,18 @@ unsigned int SIM800::sendCommandAndReadResponse(const char* cmd, char* resp, uns
     unsigned int respLen = 0;
 
     if (received) {
-        respLen = cmdBufferPos;
-        memcpy(resp, cmdBuffer, cmdBufferPos);
+        respLen = _responseBufferPos;
+        memcpy(resp, _responseBuffer, _responseBufferPos);
     }
 
-    resetCommandBuffer();
+    resetResponseBuffer();
 
     return respLen;
 }
 
 bool SIM800::sendCommandAndVerifyResponse(const char* cmd, const char* expectedResponse, unsigned int timeout) {
-    char resp[SIM800_CMD_BUFFER_LENGTH];
-    memset(resp, 0, SIM800_CMD_BUFFER_LENGTH);
+    char resp[SIM800_RESPONSE_BUFFER_LENGTH];
+    memset(resp, 0, SIM800_RESPONSE_BUFFER_LENGTH);
     sendCommandAndReadResponse(cmd, resp, timeout, true);
     if (strcmp(resp, expectedResponse) != 0) {
         Serial.print(">>");
@@ -79,19 +82,20 @@ bool SIM800::loop_internal() {
 
     while (_serial->available() && commandReceived == false) {
         char ch = _serial->read();
+        _lastSerialActivity = millis();
 
         if ('\n' == ch) {
             //Ignore these.
         } else if ('\r' == ch) {
-            if (cmdBufferPos > 0) {
+            if (_responseBufferPos > 0) {
                 commandReceived = true;
             }
         } else {
-            cmdBuffer[cmdBufferPos] = ch;
-            cmdBufferPos++;
-            if (cmdBufferPos == sizeof(cmdBuffer)) {
-                Serial.println(F("SIM800 serial buffer overflow detected."));
-                cmdBuffer[sizeof(cmdBuffer)-1] = 0;
+            _responseBuffer[_responseBufferPos] = ch;
+            _responseBufferPos++;
+            if (_responseBufferPos == sizeof(_responseBuffer)) {
+                Serial.println(F("SIM800C serial buffer overflow detected."));
+                _responseBuffer[sizeof(_responseBuffer)-1] = 0;
                 commandReceived = true;
                 flush(250);
             }
@@ -105,16 +109,21 @@ void SIM800::loop() {
     bool cmdReceived = loop_internal();
 
     if (cmdReceived) {
-        _cmdProcessor(cmdBuffer);
-        resetCommandBuffer();
+        _cmdProcessor(_responseBuffer);
+        resetResponseBuffer();
     }
 }
 
-void SIM800::resetCommandBuffer() {
-    memset(cmdBuffer, 0, sizeof(cmdBuffer));
-    cmdBufferPos = 0;
+void SIM800::resetResponseBuffer() {
+    memset(_responseBuffer, 0, sizeof(_responseBuffer));
+    _responseBufferPos = 0;
 }
 
 void SIM800::write(char ch) {
     _serial->write(ch);
+}
+
+unsigned long SIM800::getMillisSinceLastSerialActivity() {
+    // Millis() overflow is handled.
+    return millis() - _lastSerialActivity;
 }
