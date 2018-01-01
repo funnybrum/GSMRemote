@@ -18,13 +18,15 @@ Required components:
 
 ## Wiring diagram
 
-Some parts are still missing. Like the rellay control circuit and the VCC monitoring circuit.
+Still not completely tested. The VBAT measruing circuit may be modified, the other parts look fine. Almost any NPN transistor with sufficient Hfe should do the job. I'm using BC550C. The relay should be 12V one.
 
 ### Details
 
 The cheap SIM800C I got was designed for 5V. There were two diodes (the one in red) that should lower the 5V below 4.2V (this is the highest acceptable voltage for SIM800C). Well, they didn't worked because even at 5.1V the voltage drop over them while the module was connecting to the network was so high, that the SIM800C VCC was getting below 3.3V and resetting. To resolve this - short circuit the diodes. This will achive higher efficiency. Both the Arduino (at 16MHZ) and the SIM800C operate totaly fine on 3.8V.
 
-The diode between 3.8V and the Arduino 5V pin is to protect the SIM800C in case the arduino is connected to a computer USB port. According the SIM800C datasheet 5V VCC should fry it.
+The diode between 3.8V and the Arduino 5V pin is to protect the SIM800C in case the arduino is connected to a computer USB port. According the SIM800C datasheet 5V VCC should fry it. The diode should be a low drop one.
+
+The diode between SIM800C PWR pin and Arduino D4 is again for protecting the SIM800C. It allows the arduino to bring the PWR pin low and to switch on/off the SIM800C. I used a low drop diode, but I suspect that even regular diode here would be fine.
 
 ![GSM Remote wiring diagram](./schematic/gsm_remote.png "Wiring diagram")
 
