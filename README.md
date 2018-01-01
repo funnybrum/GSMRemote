@@ -38,5 +38,4 @@ Several commands should be executed prior using the provided source code.
 
 ## TODOs
 * Add voltage monitoring circuit and code.
-* Measure the power consumption over 24 hours.
-* Update the wiring diagram to include all details (step down module, relay, voltage monitoring).
+* Measure the power consumption over 24 hours and publish the results.
