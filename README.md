@@ -48,7 +48,7 @@ The power LEDs were removed. After that the power consumption was measured:
 * SIM800C in sleep mode - from 0.5mA to 1.2mA @ 12V
 * Arduino - 3.9mA @ 12V .
 
-The step down converter current was measured with its output disconnected. So this 7mA are 100% only for it. Next step - find better regulator with higher efficiency.
+The step down converter current was measured with its output disconnected. So this 7mA are 100% only for it. A quick check in the datasheet of LM2596 shows quiescent current to be from 5mA to 10mA. Next step - find better regulator with higher efficiency. An MP2307 should do the job, the quiescent current there should be less than 1.5mA. Other option is MP1584 with quiescent current of 0.1mA.
 
 The Arduino 3.9mA may be a bit incorrect as they don't consider what are the power losses in the stepdown converter. A better one would most likely reduce them. Also the build in 5V linear regulator may be removed, but the gains will be pretty small, so I'm most likely keeping it.
 
