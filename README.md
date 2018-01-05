@@ -37,7 +37,6 @@ Several commands should be executed prior using the provided source code.
 * AT+CLIP=1 -> Set CLIP mode to 1. This will provide the calling number on each RING.
 
 ## TODOs
-* Add voltage monitoring circuit and code.
 * Measure the power consumption over 24 hours and publish the results.
 
 ## Update log
@@ -53,3 +52,6 @@ The step down converter current was measured with its output disconnected. So th
 The Arduino 3.9mA may be a bit incorrect as they don't consider what are the power losses in the stepdown converter. A better one would most likely reduce them. Also the build in 5V linear regulator may be removed, but the gains will be pretty small, so I'm most likely keeping it.
 
 The initial target is less than 10mA @ 12V. Seems that with good voltage regulator I should be able to reach around 5-7mA @ 12V. Further optimization on the software may reduce them even more.
+
+### 6 January 2018
+Added the circuit for monitoring the external voltage. This is done by 2 resistors acting as voltage divider. The resistors are 55K and 4.3K. This should be consuming around 0.2mA at 12V. Since the resitance is a bit too high for reliable analog measurments a capacitor of 220nF was added between the analog pin and the ground. The result is quite stable external voltage reading.

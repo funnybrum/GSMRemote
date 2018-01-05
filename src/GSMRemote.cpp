@@ -25,6 +25,9 @@
 
 #define NETWORK_STATUS_CHECK_INTERVAL MIN_TO_MILLIS(5L)
 
+// If the battery voltage is >=13V - turn of the external device.
+#define VBAT_TURN_OFF_VOLTAGE 13000
+
 
 void HandleResponse(char*);
 
@@ -38,6 +41,19 @@ unsigned long lastGoodNetworkStatus;
 unsigned long externalDevicePoweredOnAt;
 bool externalDevicePoweredOn = false;
 
+/**
+ * Get the battery voltage. Result is in millivolts. The calculations expect the analog reference
+ * to be set to 1100mV.
+ */
+int getBatteryVoltage() {
+    long vbat = analogRead(VBAT_PIN);
+    vbat *= R1 + R2;
+    vbat /= R2;
+    vbat *= 1100;
+    vbat /= 1023;
+    return (int)vbat;
+}
+
 void powerOn(bool powerOn) {
     Serial.print(F("Setting external device power state to: "));
     Serial.println(powerOn?"ON":"OFF");
@@ -45,14 +61,6 @@ void powerOn(bool powerOn) {
     externalDevicePoweredOnAt = millis();
     externalDevicePoweredOn = powerOn;
 }
-
-/**
-  RING
-  +CLIP: "+35988xxxxxxx",145,"",0,"",0
-  RING
-  +CLIP: "+35988xxxxxxx",145,"",0,"",0
-  NO CARRIER
- */
 
 void CheckNetworkStatus() {
     // Weak up
@@ -97,11 +105,10 @@ void CheckTimeConstraints() {
         if (timeSinceExternalDeviceWasPoweredOn > MAX_TURN_ON_DURATION) {
             powerOn(false);
         }
-        
-        // TODO - add circuit to check external VCC (~12V). If the engine is powered on it will
-        // be at >13V . By design - if the car is powered on the remote should turn off the heater
-        // device. The user has the power to keep it running if he needs it by manually activating
-        // the detault power button prior starting the engine.
+
+        if (getBatteryVoltage() >= VBAT_TURN_OFF_VOLTAGE) {
+            powerOn(false);
+        }
     }
 }
 
@@ -163,9 +170,12 @@ void setup() {
     pinMode(SIM800_PW_PIN, OUTPUT);
     digitalWrite(SIM800_PW_PIN, HIGH);
 
-    // Prepare the relay pin
+    // Prepare the relay pin.
     pinMode(RELAY_PIN, OUTPUT);
     digitalWrite(RELAY_PIN, LOW);
+
+    // Set the analog reference for VBAT readings. The aref should become 1.1V on Arduino Nano.
+    analogReference(INTERNAL);
 
     Serial.begin(9600);
     
@@ -201,6 +211,8 @@ void loop() {
             sim800.write(0x1A);
         } else if (ch == '~') {
             CheckNetworkStatus();
+        } else if (ch == '!') {
+            Serial.println(getBatteryVoltage());
         } else {
             sim800.write(ch);
         }
