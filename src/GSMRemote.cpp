@@ -81,13 +81,17 @@ void CheckNetworkStatus() {
 
     if (networkStatus == 1) {
         lastGoodNetworkStatus = millis();
+
+        // Get back to sleep mode.
+        bool sleepResult = sim800.sendCommandAndVerifyResponse("AT+CSCLK=2", "OK");
+        if (!sleepResult) {
+            Serial.println(F("Failed to enter sleep mode!"));
+        }
+    } else {
+        Serial.print(F("Network status: "));
+        Serial.println(networkStatus);
     }
 
-    // Get back to sleep mode.
-    bool sleepResult = sim800.sendCommandAndVerifyResponse("AT+CSCLK=2", "OK");
-    if (!sleepResult) {
-        Serial.println(F("Failed to enter sleep mode!"));
-    }
 }
 
 void CheckTimeConstraints() {
@@ -177,6 +181,9 @@ void setup() {
 
     // Set the analog reference for VBAT readings. The aref should become 1.1V on Arduino Nano.
     analogReference(INTERNAL);
+
+    // Ignore the first VBAT reading as it is garbage for some reason.
+    getBatteryVoltage();
 
     Serial.begin(9600);
     

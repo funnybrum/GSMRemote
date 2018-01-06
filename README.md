@@ -56,4 +56,4 @@ The initial target is less than 10mA @ 12V. Seems that with good voltage regulat
 ### 6 January 2018
 Added the circuit for monitoring the external voltage. This is done by 2 resistors acting as voltage divider. The resistors are 55K and 4.3K. This should be consuming around 0.2mA at 12V. Since the resitance is a bit too high for reliable analog measurments a capacitor of 220nF was added between the analog pin and the ground. The result is quite stable external voltage reading.
 
-Also started using the LowPower library to replace the delays with low power delays. The Arduino power consumption seems to be ~1.5mA @ 12V after this.
+Also started using the LowPower library to replace the delays with low power delays. The Arduino power consumption seems to be ~1.5mA @ 12V after this. After this modification even with the bad regulator the idle current stays around 10mA.
