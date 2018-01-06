@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <TaskScheduler.h>
+#include "LowPower.h"
 #include "Pins.h"
 #include "Secrets.h"
 #include "SIM800.h"
@@ -191,10 +192,17 @@ void setup() {
     Serial.println(F("Setup completed."));
 }
 
+void lowPowerDelay(unsigned long aDelay) {
+    unsigned long sleepTo = millis() + aDelay;
+    while (millis() < sleepTo) {
+        LowPower.idle(SLEEP_15MS, ADC_ON, TIMER2_ON, TIMER1_ON, TIMER0_ON, SPI_OFF, USART0_ON, TWI_OFF);
+    }
+}
+
 void loop() {
     runner.execute();
     sim800.loop();
-    delay(100);
+    lowPowerDelay(100);
 
     // For debugging purposes. Any character received on the Arduino serial interface will be
     // forwarded to the SIM800C serial interface. There are a few special charactes:
