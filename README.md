@@ -36,6 +36,10 @@ Several commands should be executed prior using the provided source code.
 * ATE0&W -> Set ECHO to OFF and save the settings.
 * AT+CLIP=1 -> Set CLIP mode to 1. This will provide the calling number on each RING.
 
+## Getting the code ready to use
+
+Open Secrets.h and modify the authorized GSM number. Otherwise your calls will be ignored.
+
 ## TODOs
 * Measure the power consumption over 24 hours and publish the results.
 

@@ -59,6 +59,7 @@ void powerOn(bool powerOn) {
     Serial.print(F("Setting external device power state to: "));
     Serial.println(powerOn?"ON":"OFF");
     digitalWrite(RELAY_PIN, powerOn?HIGH:LOW);
+    digitalWrite(RELAY_STATUS_PIN, powerOn?HIGH:LOW);
     externalDevicePoweredOnAt = millis();
     externalDevicePoweredOn = powerOn;
 }
@@ -178,6 +179,9 @@ void setup() {
     // Prepare the relay pin.
     pinMode(RELAY_PIN, OUTPUT);
     digitalWrite(RELAY_PIN, LOW);
+
+    pinMode(RELAY_STATUS_PIN, OUTPUT);
+    digitalWrite(RELAY_STATUS_PIN, LOW);
 
     // Set the analog reference for VBAT readings. The aref should become 1.1V on Arduino Nano.
     analogReference(INTERNAL);
